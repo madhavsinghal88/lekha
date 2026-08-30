@@ -1,6 +1,12 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import {
+  formatAmountEntry,
+  isExpression,
+  resolveAmount,
+  sanitizeAmountEntry,
+} from "@/lib/amount";
 import { evaluateExpression } from "@/lib/expression";
 import { formatAmountInput, formatINRSmart } from "@/lib/format";
 import { cn } from "./ui";
@@ -20,6 +26,16 @@ export function AmountInput({
 }) {
   const [calcOpen, setCalcOpen] = useState(false);
 
+  const pendingSum = isExpression(sanitizeAmountEntry(value));
+  const result = pendingSum ? resolveAmount(value) : null;
+
+  /** Replaces "49000-35000" with its result. */
+  const commit = () => {
+    if (!pendingSum) return;
+    if (result === null) return;
+    onChange(formatAmountInput(String(result)));
+  };
+
   return (
     <div className="relative">
       <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-medium text-slate-400">
@@ -32,9 +48,17 @@ export function AmountInput({
         autoComplete="off"
         autoFocus={autoFocus}
         aria-invalid={invalid || undefined}
-        placeholder="Enter amount"
+        placeholder="Enter amount or 49000-35000"
         value={value}
-        onChange={(event) => onChange(formatAmountInput(event.target.value))}
+        onChange={(event) => onChange(formatAmountEntry(event.target.value))}
+        onBlur={commit}
+        onKeyDown={(event) => {
+          if (event.key === "Enter" && pendingSum) {
+            // Resolve the sum in place instead of submitting the form.
+            event.preventDefault();
+            commit();
+          }
+        }}
         className={cn(
           "w-full rounded-lg border bg-white py-2.5 pl-7 pr-11 text-sm font-medium tabular-nums text-slate-900 shadow-xs outline-none transition placeholder:font-normal placeholder:text-slate-400 focus:ring-2 focus:ring-slate-900/10",
           invalid
@@ -52,11 +76,25 @@ export function AmountInput({
         <CalculatorIcon />
       </button>
 
+      {pendingSum ? (
+        <p
+          aria-live="polite"
+          className={cn(
+            "mt-1 text-xs font-medium tabular-nums",
+            result === null ? "text-rose-600" : "text-slate-600",
+          )}
+        >
+          {result === null
+            ? "Can't calculate that"
+            : `= ${formatINRSmart(result)} · press Enter`}
+        </p>
+      ) : null}
+
       {calcOpen ? (
         <CalculatorPopover
           onClose={() => setCalcOpen(false)}
-          onUse={(result) => {
-            onChange(formatAmountInput(String(result)));
+          onUse={(computed) => {
+            onChange(formatAmountInput(String(computed)));
             setCalcOpen(false);
           }}
         />

@@ -1,7 +1,13 @@
 "use client";
 
 import { useState } from "react";
-import { formatAmountInput, formatINRSmart, parseAmountInput } from "@/lib/format";
+import {
+  formatAmountEntry,
+  isExpression,
+  resolveAmount,
+  sanitizeAmountEntry,
+} from "@/lib/amount";
+import { formatAmountInput, formatINRSmart } from "@/lib/format";
 import { Card, cn, inputClass } from "./ui";
 
 /**
@@ -27,9 +33,19 @@ export function BankBalance({
     setEditing(true);
   };
 
+  const pendingSum = isExpression(sanitizeAmountEntry(draft));
+  const draftResult = pendingSum ? resolveAmount(draft) : null;
+
   const save = () => {
-    const parsed = parseAmountInput(draft);
-    onChange(Number.isFinite(parsed) ? parsed : 0);
+    // Enter on a sum resolves it in place first, so the result is visible
+    // before it is committed.
+    if (pendingSum) {
+      if (draftResult === null) return;
+      setDraft(formatAmountInput(String(draftResult)));
+      return;
+    }
+    const parsed = resolveAmount(draft);
+    onChange(parsed ?? 0);
     setEditing(false);
   };
 
@@ -72,9 +88,9 @@ export function BankBalance({
               aria-label="Bank balance"
               autoFocus
               inputMode="decimal"
-              placeholder="Enter your current balance"
+              placeholder="49000 or 49000-35000"
               value={draft}
-              onChange={(event) => setDraft(formatAmountInput(event.target.value))}
+              onChange={(event) => setDraft(formatAmountEntry(event.target.value))}
               onKeyDown={(event) => {
                 if (event.key === "Enter") {
                   event.preventDefault();
@@ -88,17 +104,31 @@ export function BankBalance({
           <button
             type="button"
             onClick={save}
-            className="rounded-lg bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
+            className="shrink-0 rounded-lg bg-slate-900 px-5 py-3 text-sm font-semibold text-white transition hover:bg-slate-800"
           >
-            Save
+            {pendingSum ? "=" : "Save"}
           </button>
           <button
             type="button"
             onClick={() => setEditing(false)}
-            className="rounded-lg border border-slate-200 px-4 py-3 text-sm font-medium text-slate-600 transition hover:bg-slate-50"
+            className="shrink-0 rounded-lg border border-slate-200 px-4 py-3 text-sm font-medium text-slate-600 transition hover:bg-slate-50"
           >
             Cancel
           </button>
+
+          {pendingSum ? (
+            <p
+              aria-live="polite"
+              className={cn(
+                "w-full text-xs font-medium tabular-nums",
+                draftResult === null ? "text-rose-600" : "text-slate-600",
+              )}
+            >
+              {draftResult === null
+                ? "Can't calculate that"
+                : `= ${formatINRSmart(draftResult)} · press Enter`}
+            </p>
+          ) : null}
         </div>
       ) : (
         <>

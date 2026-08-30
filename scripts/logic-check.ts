@@ -6,6 +6,7 @@ import assert from "node:assert/strict";
 import { formatAmountInput, formatINRSmart, parseAmountInput } from "../src/lib/format";
 import { buildRows, computeTotals, computeInsights, dateRangeFor, filterRows, defaultFilters } from "../src/lib/ledger";
 import { evaluateExpression } from "../src/lib/expression";
+import { formatAmountEntry, isExpression, resolveAmount } from "../src/lib/amount";
 import { transactionsToCSV } from "../src/lib/exchange";
 import { normalizeLedger } from "../src/lib/storage";
 import type { Transaction } from "../src/lib/types";
@@ -106,6 +107,25 @@ assert.equal(insights.monthDebit, 15800);
 assert.equal(insights.monthNet, 39200);
 assert.equal(insights.biggestCredit?.remark, "Salary");
 assert.equal(insights.biggestDebit?.remark, "Rent");
+
+// Amount fields accept plain numbers and inline sums alike.
+assert.equal(resolveAmount("49,000"), 49000);
+assert.equal(resolveAmount("49000-35000"), 14000);
+assert.equal(resolveAmount("49,000 - 35,000"), 14000);
+assert.equal(resolveAmount("1500+800-200"), 2100);
+assert.equal(resolveAmount("2500*2"), 5000);
+assert.equal(resolveAmount(""), null);
+assert.equal(resolveAmount("49000-"), null);
+// Direction comes from the Credit/Debit column, so a stray leading minus on a
+// plain number is ignored rather than making the amount negative.
+assert.equal(resolveAmount("-500"), 500);
+assert.equal(isExpression("49000-35000"), true);
+assert.equal(isExpression("49000"), false);
+assert.equal(isExpression("-500"), false);
+// Grouping is applied to plain numbers only, so sums remain editable.
+assert.equal(formatAmountEntry("125000"), "1,25,000");
+assert.equal(formatAmountEntry("49000-35000"), "49000-35000");
+assert.equal(formatAmountEntry("2500x2"), "2500*2");
 
 // Calculator expressions.
 assert.equal(evaluateExpression("1500 + 800 - 200"), 2100);

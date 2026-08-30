@@ -1,7 +1,8 @@
 "use client";
 
 import { useMemo, useRef, useState, useSyncExternalStore } from "react";
-import { formatINRSmart, parseAmountInput, todayISO } from "@/lib/format";
+import { resolveAmount } from "@/lib/amount";
+import { formatINRSmart, todayISO } from "@/lib/format";
 import { TransactionType } from "@/lib/types";
 import { NewTransaction } from "@/lib/useLedger";
 import { AmountInput } from "./AmountInput";
@@ -69,8 +70,8 @@ export function BatchTransactionForm({
   const pending = useMemo(() => {
     const sum = (rows: DraftRow[]) =>
       rows.reduce((total, row) => {
-        const value = parseAmountInput(row.amount);
-        return total + (Number.isFinite(value) ? value : 0);
+        const value = resolveAmount(row.amount);
+        return total + (value ?? 0);
       }, 0);
     const credit = sum(filled.credit);
     const debit = sum(filled.debit);
@@ -98,10 +99,10 @@ export function BatchTransactionForm({
     const collect = (rows: DraftRow[], type: TransactionType) => {
       rows.forEach((row, index) => {
         if (row.amount.trim() === "") return;
-        const amount = parseAmountInput(row.amount);
+        const amount = resolveAmount(row.amount);
         const side = type === "credit" ? "Credit" : "Debit";
 
-        if (!Number.isFinite(amount) || amount <= 0) {
+        if (amount === null || amount <= 0) {
           problems.push(`${side} row ${index + 1}: enter an amount above ₹0.`);
           return;
         }

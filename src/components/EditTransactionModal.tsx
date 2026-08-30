@@ -1,7 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { formatAmountInput, parseAmountInput } from "@/lib/format";
+import { resolveAmount } from "@/lib/amount";
+import { formatAmountInput } from "@/lib/format";
 import { CATEGORIES, Transaction, TransactionType } from "@/lib/types";
 import { NewTransaction } from "@/lib/useLedger";
 import { AmountInput } from "./AmountInput";
@@ -57,8 +58,8 @@ function EditForm({
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
 
-    const parsed = parseAmountInput(amount);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
+    const parsed = resolveAmount(amount);
+    if (parsed === null || parsed <= 0) {
       setError("Enter an amount greater than ₹0.");
       return;
     }
