@@ -14,7 +14,7 @@ import { backupFilename, downloadFile, ledgerToJSON } from "@/lib/exchange";
 import { BackupReminder } from "./BackupReminder";
 import { EditTransactionModal } from "./EditTransactionModal";
 import { InsightsPanel } from "./InsightsPanel";
-import { OpeningBalance } from "./OpeningBalance";
+import { BankBalance } from "./BankBalance";
 import { SettingsMenu } from "./SettingsMenu";
 import { SummaryCards } from "./SummaryCards";
 import { TransactionCardList } from "./TransactionCard";
@@ -111,9 +111,14 @@ export function Dashboard() {
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:gap-5">
           <div className="lg:col-span-1">
-            <OpeningBalance
+            <BankBalance
               value={ledger.data.openingBalance}
+              currentBalance={ledger.totals.currentBalance}
               onChange={ledger.setOpeningBalance}
+              unset={
+                ledger.data.openingBalance === 0 &&
+                ledger.data.transactions.length === 0
+              }
             />
           </div>
           <div className="lg:col-span-2">

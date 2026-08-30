@@ -31,7 +31,7 @@ export function transactionsToCSV(
 
   const openingRow = [
     "",
-    "Opening Balance",
+    "Bank Balance (starting)",
     "",
     "",
     "",

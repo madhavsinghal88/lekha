@@ -42,7 +42,7 @@ export function SummaryCards({
         )}
       >
         <p className="text-xs font-semibold uppercase tracking-wide text-slate-300">
-          Net Balance
+          Balance Now
         </p>
         <p
           className={cn(
@@ -53,7 +53,7 @@ export function SummaryCards({
           {formatINRSmart(totals.currentBalance)}
         </p>
         <p className="mt-1 text-xs text-slate-400">
-          Opening {formatINRSmart(openingBalance)} · Net movement{" "}
+          Bank balance {formatINRSmart(openingBalance)} · Net movement{" "}
           {totals.netMovement >= 0 ? "+" : "−"}
           {formatINRSmart(Math.abs(totals.netMovement))}
         </p>

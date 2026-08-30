@@ -120,7 +120,7 @@ assert.equal(evaluateExpression("abc"), null);
 // CSV export contains the opening row and a running balance column.
 const csv = transactionsToCSV(buildRows(transactions, 20000), 20000);
 assert.ok(csv.startsWith("Date,Remark,Category,Type,Credit (INR),Debit (INR),Balance (INR)"));
-assert.ok(csv.includes("Opening Balance"));
+assert.ok(csv.includes("Bank Balance (starting)"));
 assert.ok(csv.includes("59200.00"));
 assert.ok(transactionsToCSV([tx(9, "debit", 10, "2026-08-30", 'A,"B"')], 0).includes('"A,""B"""'));
 
