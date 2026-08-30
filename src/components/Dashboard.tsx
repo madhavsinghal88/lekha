@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { formatINRSmart } from "@/lib/format";
 import {
   FilterState,
@@ -12,9 +12,10 @@ import {
 import { useLedger } from "@/lib/useLedger";
 import { backupFilename, downloadFile, ledgerToJSON } from "@/lib/exchange";
 import { BackupReminder } from "./BackupReminder";
+import { UndoBar } from "./UndoBar";
 import { EditTransactionModal } from "./EditTransactionModal";
 import { InsightsPanel } from "./InsightsPanel";
-import { BankBalance } from "./BankBalance";
+import { BankAccounts } from "./BankAccounts";
 import { SettingsMenu } from "./SettingsMenu";
 import { SummaryCards } from "./SummaryCards";
 import { TransactionCardList } from "./TransactionCard";
@@ -55,6 +56,29 @@ export function Dashboard() {
     filters.search.trim() !== "" ||
     filters.type !== "all" ||
     filters.dateFilter !== "all";
+
+  const { undo, redo } = ledger;
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.metaKey || event.ctrlKey) || event.key.toLowerCase() !== "z") {
+        return;
+      }
+      const target = event.target as HTMLElement | null;
+      // Let the browser handle text undo inside inputs.
+      if (
+        target?.tagName === "INPUT" ||
+        target?.tagName === "TEXTAREA" ||
+        target?.isContentEditable
+      ) {
+        return;
+      }
+      event.preventDefault();
+      if (event.shiftKey) redo();
+      else undo();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [undo, redo]);
 
   const downloadBackup = () => {
     downloadFile(
@@ -97,6 +121,12 @@ export function Dashboard() {
         />
       </header>
 
+      <UndoBar
+        history={ledger.history}
+        onUndo={ledger.undo}
+        onRedo={ledger.redo}
+      />
+
       <BackupReminder
         transactionCount={ledger.data.transactions.length}
         lastBackupAt={ledger.lastBackupAt}
@@ -106,19 +136,18 @@ export function Dashboard() {
       <main className="mt-6 space-y-4 sm:space-y-5">
         <SummaryCards
           totals={ledger.totals}
-          openingBalance={ledger.data.openingBalance}
+          openingBalance={ledger.openingBalance}
         />
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-3 lg:gap-5">
           <div className="lg:col-span-1">
-            <BankBalance
-              value={ledger.data.openingBalance}
+            <BankAccounts
+              accounts={ledger.data.accounts}
+              total={ledger.openingBalance}
               currentBalance={ledger.totals.currentBalance}
-              onChange={ledger.setOpeningBalance}
-              unset={
-                ledger.data.openingBalance === 0 &&
-                ledger.data.transactions.length === 0
-              }
+              onAdd={ledger.addAccount}
+              onUpdate={ledger.updateAccount}
+              onRemove={ledger.removeAccount}
             />
           </div>
           <div className="lg:col-span-2">
@@ -131,6 +160,7 @@ export function Dashboard() {
 
         <BatchTransactionForm
           onAddMany={ledger.addTransactions}
+          bankBalance={ledger.openingBalance}
           formRef={formRef}
         />
 

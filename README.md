@@ -10,7 +10,9 @@ the browser — no backend, no account.
 
 - Summary cards: total credited, total debited, net balance (prominent), and transaction count
 - Fast add form: Credit/Debit toggle, amount, remark, optional category, date
-- Editable opening balance that seeds the running balance
+- Up to five named bank accounts; their combined balance seeds the running balance
+- Half-typed entry rows autosave, so a refresh never loses work in progress
+- The pending batch previews your balance after adding it
 - Ledger with a chronological running balance, shown as a table on desktop and cards on mobile
 - Search by remark/category, filter by type and date (last 60 days by default, today, this week, this month, all time, custom range), sort by date or amount
 - Nothing is ever auto-deleted; a periodic banner reminds you to download a JSON backup
@@ -51,7 +53,8 @@ src/
     format.ts      INR + Indian-number formatting, amount input parsing, dates
     ledger.ts      Running balance, totals, filters, insights
     expression.ts  Safe arithmetic evaluator for the calculator (no eval)
-    storage.ts     localStorage read/write and import normalisation
+    storage.ts     localStorage read/write, v1→v2 migration, import normalisation
+    draft.ts       Autosave for unsubmitted entry rows
     store.ts       External store read via useSyncExternalStore
     exchange.ts    CSV/JSON export helpers
     useLedger.ts   Ledger state and mutations
@@ -62,6 +65,12 @@ scripts/
 ## Data model
 
 ```ts
+interface BankAccount {
+  id: string;
+  name: string;
+  balance: number; // starting balance
+}
+
 type TransactionType = "credit" | "debit";
 
 interface Transaction {
@@ -79,7 +88,7 @@ Balance formulas:
 
 - Total credit = sum of credit amounts
 - Total debit = sum of debit amounts
-- Current balance = opening balance + total credit − total debit
+- Current balance = combined bank balance + total credit − total debit
 - Running balance = previous balance + credit − debit, in date then insertion order
 
 ## Retention and backups

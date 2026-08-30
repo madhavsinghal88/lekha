@@ -11,10 +11,23 @@ export interface Transaction {
   createdAt: string;
 }
 
+export interface BankAccount {
+  id: string;
+  name: string;
+  balance: number;
+}
+
 export interface LedgerData {
-  version: 1;
-  openingBalance: number;
+  version: 2;
+  /** Starting balances per account. Their sum seeds every running balance. */
+  accounts: BankAccount[];
   transactions: Transaction[];
+}
+
+export const MAX_ACCOUNTS = 5;
+
+export function totalBankBalance(accounts: BankAccount[]): number {
+  return accounts.reduce((total, account) => total + account.balance, 0);
 }
 
 export const CATEGORIES = [

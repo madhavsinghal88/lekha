@@ -1,34 +1,22 @@
 "use client";
 
-import { useMemo, useRef, useState, useSyncExternalStore } from "react";
+import { useMemo, useState, useSyncExternalStore } from "react";
 import { resolveAmount } from "@/lib/amount";
+import {
+  DraftRow,
+  clearDraft,
+  emptyRow,
+  getDraftServerSnapshot,
+  getDraftSnapshot,
+  hasContent,
+  setDraft,
+  subscribeDraft,
+} from "@/lib/draft";
 import { formatINRSmart, todayISO } from "@/lib/format";
 import { TransactionType } from "@/lib/types";
 import { NewTransaction } from "@/lib/useLedger";
 import { AmountInput } from "./AmountInput";
 import { Card, cn, inputClass, labelClass } from "./ui";
-
-interface DraftRow {
-  key: string;
-  amount: string;
-  remark: string;
-}
-
-const MIN_ROWS = 3;
-
-/**
- * Row keys come from a counter seeded identically on the server and the client,
- * so element ids stay stable through hydration.
- */
-function emptyRow(sequence: number): DraftRow {
-  return { key: `row-${sequence}`, amount: "", remark: "" };
-}
-
-function initialRows(offset = 0): DraftRow[] {
-  return Array.from({ length: MIN_ROWS }, (_, index) =>
-    emptyRow(offset + index),
-  );
-}
 
 const noopSubscribe = () => () => {};
 
@@ -37,42 +25,40 @@ const noopSubscribe = () => () => {};
  * build-time date would go stale.
  */
 function useToday(): string {
-  return useSyncExternalStore(
-    noopSubscribe,
-    todayISO,
-    () => "",
-  );
+  return useSyncExternalStore(noopSubscribe, todayISO, () => "");
 }
 
 export function BatchTransactionForm({
   onAddMany,
+  bankBalance,
   formRef,
 }: {
   onAddMany: (transactions: NewTransaction[]) => void;
+  bankBalance: number;
   formRef?: React.Ref<HTMLFormElement>;
 }) {
   const today = useToday();
-  const [dateOverride, setDateOverride] = useState("");
-  const defaultDate = dateOverride || today;
-  const [creditRows, setCreditRows] = useState<DraftRow[]>(() => initialRows());
-  const [debitRows, setDebitRows] = useState<DraftRow[]>(() => initialRows());
+  const draft = useSyncExternalStore(
+    subscribeDraft,
+    getDraftSnapshot,
+    getDraftServerSnapshot,
+  );
   const [error, setError] = useState<string | null>(null);
   const [savedCount, setSavedCount] = useState(0);
 
+  const date = draft.date || today;
+
   const filled = useMemo(
     () => ({
-      credit: creditRows.filter((row) => row.amount.trim() !== ""),
-      debit: debitRows.filter((row) => row.amount.trim() !== ""),
+      credit: draft.credit.filter((row) => row.amount.trim() !== ""),
+      debit: draft.debit.filter((row) => row.amount.trim() !== ""),
     }),
-    [creditRows, debitRows],
+    [draft.credit, draft.debit],
   );
 
   const pending = useMemo(() => {
     const sum = (rows: DraftRow[]) =>
-      rows.reduce((total, row) => {
-        const value = resolveAmount(row.amount);
-        return total + (value ?? 0);
-      }, 0);
+      rows.reduce((total, row) => total + (resolveAmount(row.amount) ?? 0), 0);
     const credit = sum(filled.credit);
     const debit = sum(filled.debit);
     return {
@@ -83,11 +69,53 @@ export function BatchTransactionForm({
     };
   }, [filled]);
 
+  const projectedBalance = bankBalance + pending.net;
+
+  const setRows = (
+    type: TransactionType,
+    updater: (rows: DraftRow[]) => DraftRow[],
+  ) =>
+    setDraft((current) => ({
+      ...current,
+      [type]: updater(current[type]),
+    }));
+
+  const updateRow = (
+    type: TransactionType,
+    key: string,
+    patch: Partial<DraftRow>,
+  ) => {
+    if (error) setError(null);
+    if (savedCount) setSavedCount(0);
+    setRows(type, (rows) =>
+      rows.map((row) => (row.key === key ? { ...row, ...patch } : row)),
+    );
+  };
+
+  const addRow = (type: TransactionType) =>
+    setDraft((current) => ({
+      ...current,
+      [type]: [...current[type], emptyRow(current.sequence)],
+      sequence: current.sequence + 1,
+    }));
+
+  const removeRow = (type: TransactionType, key: string) =>
+    setDraft((current) => {
+      const rows = current[type];
+      return {
+        ...current,
+        [type]:
+          rows.length <= 1
+            ? [emptyRow(current.sequence)]
+            : rows.filter((row) => row.key !== key),
+        sequence: current.sequence + 1,
+      };
+    });
+
   const submit = (event: React.FormEvent) => {
     event.preventDefault();
     setSavedCount(0);
 
-    const date = defaultDate;
     if (!date) {
       setError("Pick a date for these transactions.");
       return;
@@ -117,8 +145,8 @@ export function BatchTransactionForm({
       });
     };
 
-    collect(creditRows, "credit");
-    collect(debitRows, "debit");
+    collect(draft.credit, "credit");
+    collect(draft.debit, "debit");
 
     if (problems.length > 0) {
       setError(problems[0]);
@@ -130,8 +158,7 @@ export function BatchTransactionForm({
     }
 
     onAddMany(collected);
-    setCreditRows(initialRows());
-    setDebitRows(initialRows());
+    clearDraft();
     setError(null);
     setSavedCount(collected.length);
   };
@@ -145,15 +172,18 @@ export function BatchTransactionForm({
           </h2>
           <p className="mt-0.5 text-xs text-slate-500">
             Fill any number of rows on both sides, then add them all at once.
+            {hasContent(draft) ? " Unsaved rows are kept if you refresh." : ""}
           </p>
         </div>
         <label className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-slate-500">
           Date
           <input
             type="date"
-            value={defaultDate}
-            onChange={(event) => setDateOverride(event.target.value)}
-            className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm text-slate-700 outline-none focus:border-slate-400"
+            value={date}
+            onChange={(event) =>
+              setDraft((current) => ({ ...current, date: event.target.value }))
+            }
+            className="rounded-lg border border-slate-200 px-2.5 py-1.5 text-sm font-normal normal-case tracking-normal text-slate-700 outline-none focus:border-slate-400"
           />
         </label>
       </div>
@@ -162,50 +192,67 @@ export function BatchTransactionForm({
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2 lg:gap-5">
           <EntryColumn
             type="credit"
-            rows={creditRows}
-            setRows={setCreditRows}
+            rows={draft.credit}
             total={pending.credit}
             count={filled.credit.length}
             firstAmountId="amount"
+            onUpdate={updateRow}
+            onAdd={addRow}
+            onRemove={removeRow}
           />
           <EntryColumn
             type="debit"
-            rows={debitRows}
-            setRows={setDebitRows}
+            rows={draft.debit}
             total={pending.debit}
             count={filled.debit.length}
+            onUpdate={updateRow}
+            onAdd={addRow}
+            onRemove={removeRow}
           />
         </div>
 
         <div className="mt-5 flex flex-col gap-3 border-t border-slate-200 pt-4 sm:flex-row sm:items-center sm:justify-between">
-          <p className="text-sm text-slate-600">
+          <div className="text-sm text-slate-600">
             {pending.count === 0 ? (
               "Nothing to add yet."
             ) : (
               <>
-                <span className="font-medium text-slate-900">
-                  {pending.count}{" "}
-                  {pending.count === 1 ? "transaction" : "transactions"}
-                </span>{" "}
-                ready · In{" "}
-                <strong className="tabular-nums text-emerald-600">
-                  {formatINRSmart(pending.credit)}
-                </strong>{" "}
-                · Out{" "}
-                <strong className="tabular-nums text-rose-600">
-                  {formatINRSmart(pending.debit)}
-                </strong>{" "}
-                · Net{" "}
-                <strong className="tabular-nums text-slate-900">
-                  {formatINRSmart(pending.net)}
-                </strong>
+                <p>
+                  <span className="font-medium text-slate-900">
+                    {pending.count}{" "}
+                    {pending.count === 1 ? "transaction" : "transactions"}
+                  </span>{" "}
+                  ready · In{" "}
+                  <strong className="tabular-nums text-emerald-600">
+                    {formatINRSmart(pending.credit)}
+                  </strong>{" "}
+                  · Out{" "}
+                  <strong className="tabular-nums text-rose-600">
+                    {formatINRSmart(pending.debit)}
+                  </strong>
+                </p>
+                <p className="mt-0.5">
+                  Bank balance{" "}
+                  <span className="tabular-nums">
+                    {formatINRSmart(bankBalance)}
+                  </span>{" "}
+                  → after adding{" "}
+                  <strong
+                    className={cn(
+                      "tabular-nums",
+                      projectedBalance < 0 ? "text-rose-600" : "text-slate-900",
+                    )}
+                  >
+                    {formatINRSmart(projectedBalance)}
+                  </strong>
+                </p>
               </>
             )}
-          </p>
+          </div>
           <button
             type="submit"
             disabled={pending.count === 0}
-            className="rounded-lg bg-slate-900 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/30 disabled:cursor-not-allowed disabled:bg-slate-300"
+            className="shrink-0 rounded-lg bg-slate-900 px-6 py-3 text-sm font-semibold text-white shadow-sm transition hover:bg-slate-800 focus:outline-none focus-visible:ring-2 focus-visible:ring-slate-900/30 disabled:cursor-not-allowed disabled:bg-slate-300"
           >
             {pending.count > 1
               ? `+ Add ${pending.count} Transactions`
@@ -232,36 +279,27 @@ export function BatchTransactionForm({
 function EntryColumn({
   type,
   rows,
-  setRows,
   total,
   count,
   firstAmountId,
+  onUpdate,
+  onAdd,
+  onRemove,
 }: {
   type: TransactionType;
   rows: DraftRow[];
-  setRows: React.Dispatch<React.SetStateAction<DraftRow[]>>;
   total: number;
   count: number;
   firstAmountId?: string;
+  onUpdate: (
+    type: TransactionType,
+    key: string,
+    patch: Partial<DraftRow>,
+  ) => void;
+  onAdd: (type: TransactionType) => void;
+  onRemove: (type: TransactionType, key: string) => void;
 }) {
   const isCredit = type === "credit";
-
-  const nextSequence = useRef(MIN_ROWS);
-
-  const updateRow = (key: string, patch: Partial<DraftRow>) =>
-    setRows((current) =>
-      current.map((row) => (row.key === key ? { ...row, ...patch } : row)),
-    );
-
-  const addRow = () =>
-    setRows((current) => [...current, emptyRow(nextSequence.current++)]);
-
-  const removeRow = (key: string) =>
-    setRows((current) =>
-      current.length <= 1
-        ? [emptyRow(nextSequence.current++)]
-        : current.filter((row) => row.key !== key),
-    );
 
   return (
     <section
@@ -303,80 +341,78 @@ function EntryColumn({
       </div>
 
       <ul className="mt-3 space-y-3">
-        {rows.map((row, index) => (
-          <li
-            key={row.key}
-            className="rounded-lg border border-slate-200 bg-white p-3"
-          >
-            <div className="flex items-start gap-2">
-              <div className="w-32 shrink-0 sm:w-36">
-                <label
-                  className={cn(labelClass, "mb-1")}
-                  htmlFor={
-                    index === 0 && firstAmountId
-                      ? firstAmountId
-                      : `${type}-amount-${row.key}`
-                  }
-                >
-                  Amount
-                </label>
-                <AmountInput
-                  id={
-                    index === 0 && firstAmountId
-                      ? firstAmountId
-                      : `${type}-amount-${row.key}`
-                  }
-                  value={row.amount}
-                  onChange={(next) => updateRow(row.key, { amount: next })}
-                />
-              </div>
+        {rows.map((row, index) => {
+          const amountId =
+            index === 0 && firstAmountId
+              ? firstAmountId
+              : `${type}-amount-${row.key}`;
 
-              <div className="min-w-0 flex-1">
-                <label
-                  className={cn(labelClass, "mb-1")}
-                  htmlFor={`${type}-remark-${row.key}`}
-                >
-                  Remark
-                </label>
-                <input
-                  id={`${type}-remark-${row.key}`}
-                  className={inputClass}
-                  placeholder="What was this for?"
-                  autoComplete="off"
-                  value={row.remark}
-                  onChange={(event) =>
-                    updateRow(row.key, { remark: event.target.value })
-                  }
-                />
-              </div>
+          return (
+            <li
+              key={row.key}
+              className="rounded-lg border border-slate-200 bg-white p-3"
+            >
+              <div className="flex items-start gap-2">
+                <div className="w-32 shrink-0 sm:w-36">
+                  <label className={cn(labelClass, "mb-1")} htmlFor={amountId}>
+                    Amount
+                  </label>
+                  <AmountInput
+                    id={amountId}
+                    value={row.amount}
+                    onChange={(next) =>
+                      onUpdate(type, row.key, { amount: next })
+                    }
+                  />
+                </div>
 
-              <button
-                type="button"
-                onClick={() => removeRow(row.key)}
-                aria-label={`Clear ${isCredit ? "credit" : "debit"} row ${index + 1}`}
-                className="mt-6 shrink-0 rounded-md p-2 text-slate-400 transition hover:bg-slate-100 hover:text-rose-600"
-              >
-                <svg
-                  width="15"
-                  height="15"
-                  viewBox="0 0 24 24"
-                  fill="none"
-                  stroke="currentColor"
-                  strokeWidth="2"
-                  strokeLinecap="round"
-                  aria-hidden="true"
+                <div className="min-w-0 flex-1">
+                  <label
+                    className={cn(labelClass, "mb-1")}
+                    htmlFor={`${type}-remark-${row.key}`}
+                  >
+                    Remark
+                  </label>
+                  <input
+                    id={`${type}-remark-${row.key}`}
+                    className={inputClass}
+                    placeholder="What was this for?"
+                    autoComplete="off"
+                    value={row.remark}
+                    onChange={(event) =>
+                      onUpdate(type, row.key, { remark: event.target.value })
+                    }
+                  />
+                </div>
+
+                <button
+                  type="button"
+                  onClick={() => onRemove(type, row.key)}
+                  aria-label={`Clear ${isCredit ? "credit" : "debit"} row ${index + 1}`}
+                  className="mt-6 shrink-0 rounded-md p-2 text-slate-400 transition hover:bg-slate-100 hover:text-rose-600"
                 >
-                  <path d="M6 6l12 12M18 6L6 18" />
-                </svg>
-              </button>
-            </div>
-          </li>
-        ))}
+                  <svg
+                    width="15"
+                    height="15"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    strokeWidth="2"
+                    strokeLinecap="round"
+                    aria-hidden="true"
+                  >
+                    <path d="M6 6l12 12M18 6L6 18" />
+                  </svg>
+                </button>
+              </div>
+            </li>
+          );
+        })}
       </ul>
 
       <button
         type="button"
-        onClick={addRow}
+        onClick={() => onAdd(type)}
         className={cn(
           "mt-3 w-full rounded-lg border border-dashed px-3 py-2 text-sm font-semibold transition",
           isCredit

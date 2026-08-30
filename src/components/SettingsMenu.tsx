@@ -9,7 +9,7 @@ import {
 } from "@/lib/exchange";
 import { sortChronologically } from "@/lib/ledger";
 import { normalizeLedger } from "@/lib/storage";
-import { LedgerData } from "@/lib/types";
+import { LedgerData, totalBankBalance } from "@/lib/types";
 import { ConfirmDialog, cn } from "./ui";
 
 export function SettingsMenu({
@@ -47,7 +47,7 @@ export function SettingsMenu({
   const exportCSV = () => {
     const csv = transactionsToCSV(
       sortChronologically(data.transactions),
-      data.openingBalance,
+      totalBankBalance(data.accounts),
     );
     downloadFile(backupFilename("csv"), csv, "text/csv");
     setOpen(false);

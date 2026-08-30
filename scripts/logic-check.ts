@@ -9,6 +9,21 @@ import { evaluateExpression } from "../src/lib/expression";
 import { formatAmountEntry, isExpression, resolveAmount } from "../src/lib/amount";
 import { transactionsToCSV } from "../src/lib/exchange";
 import { normalizeLedger } from "../src/lib/storage";
+import { MAX_ACCOUNTS, totalBankBalance } from "../src/lib/types";
+import {
+  getHistorySnapshot,
+  getSnapshot,
+  redo,
+  resetStore,
+  setLedger,
+  undo,
+} from "../src/lib/store";
+import {
+  MIN_ROWS,
+  emptyDraft,
+  hasContent,
+  normalizeDraft,
+} from "../src/lib/draft";
 import type { Transaction } from "../src/lib/types";
 
 const tx = (
@@ -144,13 +159,94 @@ assert.ok(csv.includes("Bank Balance (starting)"));
 assert.ok(csv.includes("59200.00"));
 assert.ok(transactionsToCSV([tx(9, "debit", 10, "2026-08-30", 'A,"B"')], 0).includes('"A,""B"""'));
 
-// Import normalisation drops junk and keeps valid rows.
+// Import normalisation drops junk and keeps valid rows. A v1 backup with a
+// single openingBalance migrates into one named account.
 const imported = normalizeLedger({
   openingBalance: "5000",
   transactions: [tx(1, "credit", 100, "2026-08-30"), { amount: -5 }, null, "x"],
 });
-assert.equal(imported.openingBalance, 5000);
+assert.equal(imported.version, 2);
+assert.equal(imported.accounts.length, 1);
+assert.equal(imported.accounts[0].name, "Bank");
+assert.equal(totalBankBalance(imported.accounts), 5000);
 assert.equal(imported.transactions.length, 1);
 assert.deepEqual(normalizeLedger("nonsense").transactions, []);
+assert.deepEqual(normalizeLedger({ openingBalance: 0 }).accounts, []);
+
+// Multiple accounts total up, and no more than five are ever kept.
+const multi = normalizeLedger({
+  accounts: [
+    { id: "a", name: "HDFC", balance: 46254 },
+    { id: "b", name: "SBI", balance: "3746" },
+    { name: "Cash", balance: 1000 },
+    "junk",
+  ],
+  transactions: [],
+});
+assert.equal(multi.accounts.length, 3);
+assert.equal(totalBankBalance(multi.accounts), 51000);
+assert.ok(multi.accounts[2].id, "a missing account id is generated");
+assert.equal(
+  normalizeLedger({
+    accounts: Array.from({ length: 9 }, (_, i) => ({
+      id: `a${i}`,
+      name: `Bank ${i}`,
+      balance: 100,
+    })),
+  }).accounts.length,
+  MAX_ACCOUNTS,
+);
+
+// Draft autosave keeps half-typed rows and ignores malformed ones.
+const restored = normalizeDraft({
+  date: "2026-08-30",
+  credit: [{ key: "row-0", amount: "1,500", remark: "Salary" }, null],
+  debit: "nope",
+  sequence: 4,
+});
+assert.equal(restored.date, "2026-08-30");
+assert.equal(restored.credit.length, 1);
+assert.equal(restored.credit[0].amount, "1,500");
+assert.equal(restored.debit.length, MIN_ROWS, "missing side falls back to blanks");
+assert.equal(hasContent(restored), true);
+assert.equal(hasContent(emptyDraft()), false);
+assert.equal(normalizeDraft("nonsense").date, "");
+assert.equal(normalizeDraft({ date: "30-08-2026" }).date, "", "bad dates dropped");
+
+// Undo/redo history: every change is reversible, including a reset.
+const account = { id: "acc", name: "HDFC", balance: 46254 };
+setLedger({ version: 2, accounts: [account], transactions: [] }, "Added an account");
+assert.equal(getHistorySnapshot().canUndo, true);
+assert.equal(getHistorySnapshot().lastAction, "Added an account");
+
+setLedger(
+  (current) => ({ ...current, transactions: [tx(1, "debit", 31781.77, "2026-08-31")] }),
+  "Added 1 transaction",
+);
+assert.equal(getSnapshot().transactions.length, 1);
+assert.equal(getHistorySnapshot().lastAction, "Added 1 transaction");
+
+undo();
+assert.equal(getSnapshot().transactions.length, 0, "the added transaction is gone");
+assert.equal(getSnapshot().accounts.length, 1, "but the account survives");
+assert.equal(getHistorySnapshot().canRedo, true);
+
+redo();
+assert.equal(getSnapshot().transactions.length, 1, "redo puts it back");
+
+resetStore();
+assert.equal(getSnapshot().transactions.length, 0);
+assert.equal(getSnapshot().accounts.length, 0);
+assert.equal(getHistorySnapshot().lastAction, "Reset ledger");
+undo();
+assert.equal(getSnapshot().transactions.length, 1, "a reset can be undone");
+assert.equal(totalBankBalance(getSnapshot().accounts), 46254);
+
+// Undo past the start is a no-op rather than an error.
+undo();
+undo();
+undo();
+undo();
+assert.equal(getHistorySnapshot().canUndo, false);
 
 console.log("All logic checks passed.");
